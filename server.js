@@ -4,10 +4,7 @@ const cors = require('cors');
 const app = express();
 const port = 3001;
 
-// フロントエンドとの通信を許可するため CORS を有効化
 app.use(cors());
-
-// JSON形式のリクエストボディをパースするミドルウェア
 app.use(express.json());
 
 // サンプルの単語データベース（in-memory）
@@ -19,18 +16,17 @@ let words = [
 ];
 
 // 各レベルに応じた復習間隔（ミリ秒）
-// ※MVP のため、短い間隔（例：1 分～1 日）に設定しています
 const levelIntervals = {
-    1: 1 * 60 * 1000,   // 1分
-    2: 5 * 60 * 1000,   // 5分
-    3: 10 * 60 * 1000,  // 10分
-    4: 60 * 60 * 1000,  // 1時間
-    5: 24 * 60 * 60 * 1000, // 1日
+    1: 1 * 60 * 1000,    // 1分
+    2: 5 * 60 * 1000,    // 5分
+    3: 10 * 60 * 1000,   // 10分
+    4: 60 * 60 * 1000,   // 1時間
+    5: 24 * 60 * 60 * 1000  // 1日
 };
 
 // 単語が復習対象かどうかを判定する関数
 function isDue(word) {
-    // 未学習の場合は常に対象にする
+    // 未学習の場合は常に対象
     if (!word.lastStudiedAt) return true;
     const interval = levelIntervals[word.level] || levelIntervals[1];
     return (Date.now() - word.lastStudiedAt) >= interval;
@@ -61,6 +57,19 @@ app.post('/api/words/:id/update', (req, res) => {
     // 最終学習日時を更新
     word.lastStudiedAt = Date.now();
     res.json(word);
+});
+
+// ★ 新規追加：単語を登録する API エンドポイント
+app.post('/api/words', (req, res) => {
+    const { word, meaning } = req.body;
+    if (!word || !meaning) {
+        return res.status(400).json({ message: "単語と意味の両方を入力してください" });
+    }
+    // 新しい id を生成（配列内の最大 id + 1）
+    const newId = words.length > 0 ? Math.max(...words.map(w => w.id)) + 1 : 1;
+    const newWord = { id: newId, word, meaning, level: 1, lastStudiedAt: null };
+    words.push(newWord);
+    res.status(201).json(newWord);
 });
 
 app.listen(port, () => {
