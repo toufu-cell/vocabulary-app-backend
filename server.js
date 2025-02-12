@@ -85,9 +85,16 @@ app.post('/api/words', async (req, res) => {
     if (!word || !meaning) {
         return res.status(400).json({ message: "単語と意味の両方を入力してください" });
     }
+
     await db.read();
     const words = db.data.words;
-    // 新しい id を生成（既存の最大 id + 1）
+
+    // 重複チェック
+    const existingWord = words.find(w => w.word.toLowerCase() === word.toLowerCase());
+    if (existingWord) {
+        return res.status(409).json({ message: "この単語は既に登録されています" });
+    }
+
     const newId = words.length > 0 ? Math.max(...words.map(w => w.id)) + 1 : 1;
     const newWord = { id: newId, word, meaning, level: 1, lastStudiedAt: null };
     db.data.words.push(newWord);
