@@ -1,0 +1,19 @@
+# 依存関係
+node_modules/
+
+# データベース
+db.json
+
+# 環境設定
+.env
+
+# ログファイル
+*.log
+
+# エディタの設定
+.vscode/
+.idea/
+
+# OS生成ファイル
+.DS_Store
+Thumbs.db 
