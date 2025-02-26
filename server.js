@@ -8,7 +8,15 @@ const path = require('path');
 const app = express();
 const port = 3001;
 
-app.use(cors());
+// CORSの設定を更新
+const corsOptions = {
+    origin: '*', // すべてのオリジンを許可（開発環境のみ）
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+    credentials: true,
+    optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
 app.use(express.json());
 
 const defaultData = {
@@ -122,6 +130,41 @@ app.post('/api/words', async (req, res) => {
     res.status(201).json(newWord);
 });
 
-app.listen(port, () => {
+// 単語を削除するAPIエンドポイント
+app.delete('/api/words/:id', async (req, res) => {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) {
+        return res.status(400).json({ message: "無効なIDです" });
+    }
+
+    await db.read();
+    const words = db.data.words;
+    const wordIndex = words.findIndex(w => w.id === id);
+
+    if (wordIndex === -1) {
+        return res.status(404).json({ message: "単語が見つかりません" });
+    }
+
+    const deletedWord = words[wordIndex];
+    db.data.words.splice(wordIndex, 1);
+    await db.write();
+
+    res.json({ message: `単語 "${deletedWord.word}" を削除しました`, deletedWord });
+});
+
+// 全ての単語を取得するAPIエンドポイント
+app.get('/api/words', async (req, res) => {
+    await db.read();
+    res.json(db.data.words);
+});
+
+// ルートパスへのアクセスをフロントエンドにリダイレクト
+app.get('/', (req, res) => {
+    // フロントエンドのURLにリダイレクト
+    const frontendUrl = process.env.FRONTEND_URL || 'http://192.168.0.9:3000';
+    res.redirect(frontendUrl);
+});
+
+app.listen(port, '0.0.0.0', () => {
     console.log(`サーバーがポート ${port} で起動しました`);
 });
