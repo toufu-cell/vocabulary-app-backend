@@ -114,14 +114,6 @@ const calculateNextReview = (correct, confidence, word) => {
     };
 };
 
-// 単語が復習対象かどうかを判定する関数
-function isDue(word) {
-    // 未学習の場合は常に対象
-    if (!word.lastStudiedAt) return true;
-    const interval = levelIntervals[word.level] || levelIntervals[1];
-    return (Date.now() - word.lastStudiedAt) >= interval;
-}
-
 // 学習対象の単語を返す API エンドポイント
 app.get('/api/study', async (req, res) => {
     try {
