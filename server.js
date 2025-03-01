@@ -230,6 +230,15 @@ app.post('/api/words/:id/update', async (req, res) => {
             lastGrade
         } = calculateNextReview(correct, confidence, word);
 
+        // レベル更新ロジック
+        let newLevel = word.level || 1;
+        // 正解かつ自信度が0.5以上、またはstabilityが0.5以上の場合にレベルアップ
+        if ((correct && confidence >= 0.5) || stability >= 0.5) {
+            if (newLevel < 8) {
+                newLevel++;
+            }
+        }
+
         // 単語データの更新
         db.data.words[wordIndex] = {
             ...word,
@@ -240,7 +249,8 @@ app.post('/api/words/:id/update', async (req, res) => {
             difficulty,
             retrievability,
             nextReviewDate,
-            lastGrade
+            lastGrade,
+            level: newLevel
         };
 
         await db.write();
