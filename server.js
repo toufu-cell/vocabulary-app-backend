@@ -4,6 +4,8 @@ const cors = require('cors');
 const { Low } = require('lowdb');
 const { JSONFile } = require('lowdb/node');
 const path = require('path');
+const math = require('mathjs');
+const fs = require('fs');
 
 const app = express();
 const port = 3001;
@@ -31,7 +33,9 @@ const defaultData = {
             successCount: 0,
             failureCount: 0,
             totalReviews: 0,
-            memoryStrength: 0
+            stability: 1,
+            difficulty: 4.93,
+            retrievability: 0
         }
     ]
 };
@@ -59,58 +63,104 @@ const levelIntervals = {
     8: 30 * 24 * 60 * 60 * 1000  // 1ヶ月
 };
 
-// SM-2アルゴリズムに基づく間隔反復システムの実装
+// FSRSアルゴリズムに基づく間隔反復システムの実装
 const calculateNextReview = (correct, confidence, word) => {
-    // 現在の記憶強度（初期値は0）
-    let memoryStrength = word.memoryStrength || 0;
-
-    // 現在の復習間隔（初期値は1日）
-    let interval = word.interval || 1;
-
-    // 現在の容易度係数（初期値は2.5）
-    let easeFactor = word.easeFactor || 2.5;
-
-    // 自己評価スコアの計算（0-5のスケール）
-    // 正解かつ高い自信 = 5, 正解かつ低い自信 = 4, 不正解かつ高い自信 = 2, 不正解かつ低い自信 = 1
-    let grade;
-    if (correct) {
-        grade = confidence >= 0.7 ? 5 : 4;
-    } else {
-        grade = confidence >= 0.3 ? 2 : 1;
-    }
-
-    if (grade >= 3) {
-        // 正解の場合
-        if (memoryStrength === 0) {
-            // 初めて正解した場合
-            interval = 1;
-        } else if (memoryStrength === 1) {
-            // 2回目の正解
-            interval = 6;
-        } else {
-            // それ以降の正解
-            interval = Math.round(interval * easeFactor);
-        }
-        memoryStrength += 1;
-    } else {
-        // 不正解の場合
-        memoryStrength = Math.max(0, memoryStrength - 1);
-        interval = 1; // 間隔をリセット
-    }
-
-    // 容易度係数の更新（最小値は1.3）
-    easeFactor = Math.max(1.3, easeFactor + (0.1 - (5 - grade) * (0.08 + (5 - grade) * 0.02)));
-
-    // 次の復習日を計算
+    // FSRSパラメータの初期化
     const now = Date.now();
-    const nextReviewDate = now + interval * 24 * 60 * 60 * 1000;
+    const lastReviewDate = word.lastStudiedAt || now;
+    const elapsedDays = Math.max(1, (now - lastReviewDate) / (1000 * 60 * 60 * 24));
+
+    // 初期値
+    let stability = word.stability || 0.01; // 初回学習時の安定度をさらに低く設定
+    let difficulty = word.difficulty || 4.93;
+    const retrievability = Math.exp(Math.log(0.9) * elapsedDays / stability);
+
+    // 初回学習の場合、5分後に復習
+    if (!word.lastStudiedAt) {
+        const nextReviewDate = now + 5 * 60 * 1000; // 現在時刻から5分後
+        const retentionRate = 0.9;
+        const initialGrade = confidence; // 初回のgradeはconfidenceを使用
+
+        return {
+            stability: 0.01, // 初回安定度を0.01に設定
+            difficulty: 4.93,
+            retrievability: 0,
+            nextReviewDate,
+            lastGrade: parseFloat(initialGrade.toFixed(2)),
+            intervalDays: 5 / (60 * 24), // 5分を日数に変換
+            retentionRate: 0.9 // 初回学習時の記憶保持率を固定
+        };
+    }
+
+    // 2回目の学習の場合、5分後に復習
+    if (word.totalReviews === 1) {
+        const nextReviewDate = now + 5 * 60 * 1000; // 現在時刻から5分後
+        const elapsedDays = 5 / (60 * 24); // 5分を日数に変換
+        const retentionRate = Math.exp(Math.log(0.9) * elapsedDays / 0.1);
+        const initialGrade = confidence; // 2回目のgradeはconfidenceを使用
+
+        return {
+            stability: 0.1, // 2回目安定度を0.1に設定
+            difficulty: 4.93,
+            retrievability: 0,
+            nextReviewDate,
+            lastGrade: parseFloat(initialGrade.toFixed(2)),
+            intervalDays: 5 / (60 * 24), // 5分を日数に変換
+            retentionRate: parseFloat(retentionRate.toFixed(2)) // 記憶保持率を小数点2桁に丸める
+        };
+    }
+
+    // 評価スコア（0-1の範囲）
+    const grade = correct ? Math.min(1, Math.max(0, confidence)) : 0;
+
+    // FSRSパラメータ更新
+    const deltaRecall = grade - retrievability;
+
+    // 難易度の更新
+    difficulty = Math.max(1, Math.min(10,
+        difficulty + deltaRecall * (0.1 - difficulty * 0.02)
+    ));
+
+    // 安定度の更新
+    const stabilityFactor = 1 + Math.exp(-difficulty) *
+        (Math.pow(19, deltaRecall) - 1) *
+        Math.pow(elapsedDays, -0.5);
+    stability = Math.max(0.1, stability * stabilityFactor);
+
+    // 次回復習間隔の計算
+    console.log('FSRS Parameters:', {
+        stability,
+        difficulty,
+        retrievability,
+        elapsedDays,
+        grade
+    });
+
+    const optimalFactor = Math.log(0.9) / Math.log(0.95);
+    let intervalDays = stability * optimalFactor;
+    console.log('Initial intervalDays:', intervalDays);
+
+    // 間隔の調整（最小5分、最大365日）
+    const clampedInterval = Math.max(5 / (60 * 24), Math.min(365, intervalDays));
+    console.log('Clamped interval:', clampedInterval);
+
+    // 次回復習日時を計算（分単位で丸める）
+    const intervalMillis = clampedInterval * 24 * 60 * 60 * 1000;
+    const nextReviewDate = Math.round((now + intervalMillis) / (1000 * 60)) * 1000 * 60;
+
+    // 3回目以降の学習は通常のFSRSアルゴリズムに従う
+
+    // 記憶保持率の計算
+    const retentionRate = Math.exp(Math.log(0.9) * clampedInterval / stability);
 
     return {
-        memoryStrength,
-        interval,
-        easeFactor,
+        stability: parseFloat(stability.toFixed(2)),
+        difficulty: parseFloat(difficulty.toFixed(2)),
+        retrievability: parseFloat(retrievability.toFixed(2)),
         nextReviewDate,
-        lastGrade: grade
+        lastGrade: parseFloat(grade.toFixed(2)),
+        intervalDays: parseFloat(clampedInterval.toFixed(2)),
+        retentionRate: parseFloat(retentionRate.toFixed(2))
     };
 };
 
@@ -121,18 +171,31 @@ app.get('/api/study', async (req, res) => {
         const now = Date.now();
 
         // 復習すべき単語（次の復習日が現在以前、または未学習の単語）
-        const dueWords = db.data.words.filter(word =>
-            !word.nextReviewDate || word.nextReviewDate <= now
-        );
+        const dueWords = db.data.words.filter(word => {
+            if (!word.nextReviewDate) return true;
 
-        // 記憶強度の低い順にソート
-        dueWords.sort((a, b) => {
-            const strengthA = a.memoryStrength || 0;
-            const strengthB = b.memoryStrength || 0;
-            return strengthA - strengthB;
+            // 5分の猶予期間を設ける
+            const dueTime = word.nextReviewDate - (5 * 60 * 1000);
+            return dueTime <= now;
         });
 
-        res.json(dueWords);
+        // 安定度の低い順にソート
+        dueWords.sort((a, b) => {
+            const stabilityA = a.stability || 1;
+            const stabilityB = b.stability || 1;
+            return stabilityA - stabilityB;
+        });
+
+        // 最大10単語まで返す
+        const limitedWords = dueWords.slice(0, 10);
+
+        res.json({
+            words: limitedWords,
+            currentTime: now,
+            nextCheck: limitedWords.length > 0 ?
+                Math.min(...limitedWords.map(w => w.nextReviewDate || now)) :
+                now + (5 * 60 * 1000) // 5分後に再チェック
+        });
     } catch (error) {
         console.error('学習単語の取得に失敗しました', error);
         res.status(500).json({ error: '学習単語の取得に失敗しました' });
@@ -158,11 +221,11 @@ app.post('/api/words/:id/update', async (req, res) => {
         const totalReviews = (word.totalReviews || 0) + 1;
         const successCount = (word.successCount || 0) + (correct ? 1 : 0);
 
-        // SM-2アルゴリズムによる次回復習日の計算
+        // FSRSアルゴリズムによる次回復習日の計算
         const {
-            memoryStrength,
-            interval,
-            easeFactor,
+            stability,
+            difficulty,
+            retrievability,
             nextReviewDate,
             lastGrade
         } = calculateNextReview(correct, confidence, word);
@@ -173,9 +236,9 @@ app.post('/api/words/:id/update', async (req, res) => {
             lastStudiedAt: Date.now(),
             totalReviews,
             successCount,
-            memoryStrength,
-            interval,
-            easeFactor,
+            stability,
+            difficulty,
+            retrievability,
             nextReviewDate,
             lastGrade
         };
@@ -379,9 +442,9 @@ app.post('/api/import', async (req, res) => {
                         // 学習データは保持するか更新するかを選択可能
                         ...(req.query.keepProgress !== 'true' && {
                             level: word.level || 1,
-                            memoryStrength: word.memoryStrength || 0,
-                            interval: word.interval || 1,
-                            easeFactor: word.easeFactor || 2.5,
+                            stability: word.stability || 1,
+                            difficulty: word.difficulty || 4.93,
+                            retrievability: word.retrievability || 0,
                             totalReviews: word.totalReviews || 0,
                             successCount: word.successCount || 0
                         })
