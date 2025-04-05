@@ -10,13 +10,13 @@ const fs = require('fs');
 const app = express();
 const port = 3001;
 
-// CORSの設定を更新
 const corsOptions = {
-    origin: '*', // すべてのオリジンを許可（開発環境のみ）
+    origin: process.env.FRONTEND_URL || '*', // フロントエンドのURLを環境変数から取得
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     credentials: true,
     optionsSuccessStatus: 204
 };
+
 
 app.use(cors(corsOptions));
 app.use(express.json());
