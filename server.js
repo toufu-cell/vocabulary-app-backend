@@ -266,7 +266,7 @@ app.post('/api/words/:id/update', async (req, res) => {
     }
 });
 
-// ★ 新規追加：単語を登録する API エンドポイント
+// 単語を登録する API エンドポイント
 app.post('/api/words', async (req, res) => {
     const { word, meaning } = req.body;
     if (!word || !meaning) {
